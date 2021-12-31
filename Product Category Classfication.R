@@ -14,10 +14,10 @@ SCAuth("caiwenli@rccl.com:RCCI", "3e7a72d82de775fb55c31f4dcc51b4e0")
 library(odbc)
 con.microsoft.sql <- DBI::dbConnect(odbc::odbc(),
                                     Driver   = "SQL Server",
-                                    Server   = "rcclanalyticssql.database.windows.net",
-                                    Database = "rcclanalytics",
-                                    UID      = "caiwenli",
-                                    PWD      = "Travel.Florida2019!",
+                                    Server   = "xxx",
+                                    Database = "xxx",
+                                    UID      = "xxx",
+                                    PWD      = "xxx",
                                     Port     = 1433)
 
 dbo.rev <- paste("select * from RCCLAnalytics.dbo.MIA_MobileBookingsRevMod t where t.PRODUCT_BOOKING_DT >= '2019-01-01' AND t.PRODUCT_BOOKING_DT < '2019-09-01'", sep="")
@@ -25,10 +25,10 @@ dbo.rev <- paste("select * from RCCLAnalytics.dbo.MIA_MobileBookingsRevMod t whe
 
 power.bi.sql  <- DBI::dbConnect(odbc::odbc(),
                                 Driver   = "SQL Server",
-                                Server   = "WINPOWERBI",
-                                Database = "rcclanalytics",
-                                UID      = "Tableau_User",
-                                PWD      = "b8AEoTTwYH5sHFN6cuhF",
+                                Server   = "xxx",
+                                Database = "xxx",
+                                UID      = "xxx",
+                                PWD      = "xxx",
                                 Port     = 1433)
 
 

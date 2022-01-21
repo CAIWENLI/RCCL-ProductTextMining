@@ -1,0 +1,114 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r get adobe connection}
+rm(list=ls())
+library(RSiteCatalyst)
+library(RPostgreSQL)
+library(dplyr)
+library(dbplyr)
+library(data.table)
+library(lubridate)
+library(reshape2)
+library(stringr)
+SCAuth("caiwenli@rccl.com:RCCI", "XXXX")
+```
+
+```{r app + kiosk brand & product category}
+excalibur.prod <- "rcciexcaliburprod"
+start.date <- "2019-03-01"
+end.date <- "2019-09-30"
+
+app.brand.product.cate <- QueueTrended(excalibur.prod,
+                              start.date,
+                              end.date,
+                              metrics  = c("cm300006910_5a8de975ec83501a0bb46450","revenue","orders"),
+                              c("product","evar143"),
+                              top = 50000,
+                              date.granularity = "month",
+                              segment.id =  c("s300006910_59c41d59c06c5c10c89f449d"), # App Only
+                              classification = "Product Category")
+
+kiosk.brand.product.cate <- QueueTrended(excalibur.prod,
+                              start.date,
+                              end.date,
+                              metrics  = c("cm300006910_5a8de975ec83501a0bb46450","revenue","orders"),
+                              c("product","evar143"),
+                              top = 50000,
+                              date.granularity = "month",
+                              segment.id =  c("s300006910_5ac248b259161d7157e75c01", # Kisok only
+                                              "s300006910_59cbc683e3d26c79ed095ac0", 
+                                              "s300006910_5aabf2d3de3c976aada2a8d8"), 
+                              classification = "Product Category")
+write.csv(app.brand.product.cate,"C:/Users/7005773/Desktop/Code/R Code/RCCL/Assets/Outputs/app.brand.product.cate.csv")
+write.csv(kiosk.brand.product.cate,"C:/Users/7005773/Desktop/Code/R Code/RCCL/Assets/Outputs/kiosk.brand.product.cate.csv")
+```
+
+```{r app + kiosk ship code + sail date}
+app.ship.code.sail.date <- QueueTrended(excalibur.prod,
+                              "2019-03-01",
+                              "2019-09-30",
+                              metrics  = c("cm300006910_5a8de975ec83501a0bb46450","revenue","orders"),
+                              c("evar142"),
+                              top = 50000,
+                              max.attempts = 1000,
+                              date.granularity = "month",
+                              segment.id =  c("s300006910_59c41d59c06c5c10c89f449d"), # App Only
+                              )
+
+app.ship.code.sail.date$datetime <- as.Date(app.ship.code.sail.date$datetime)
+
+itinerary.reference <- read.csv("C:/Users/7005773/Desktop/Code/R Code/RCCL/Assets/Inputs/itinerary.reference.csv")
+
+itinerary.reference$Sailing.Date.fix <- as.character(as.Date(itinerary.reference$Sailing.Date, "%m/%d/%Y"), "%Y%m%d")
+
+itinerary.reference$vorage.id <- as.character(paste(itinerary.reference$Ship.Code, itinerary.reference$Sailing.Date.fix, sep=""))
+
+tbl_vars(destination.rev)
+destination.rev.app <- itinerary.reference %>% 
+  inner_join(app.ship.code.sail.date, by = c("vorage.id" = "name")) %>% 
+  select(datetime, Brand, Rdss.Product.Code, cm300006910_5a8de975ec83501a0bb46450, revenue, orders)
+
+colnames(destination.rev.app) <- c("month", "brand.code", "destination.code", "conversion.rate", "revenue", "orders")
+
+destination.rev.app[is.na(destination.rev.app)] <- 0
+destination.code.fixed.app <- tidyr::separate(destination.rev.app, destination.code, into = c("name", "value"), "(?<=[A-Z])(?=[0-9])") %>% 
+  filter(revenue != 0) %>% 
+  group_by(brand.code, month, name) %>% 
+  summarise(conversion.rate.avg = mean(conversion.rate*0.01),
+            revenue = sum(revenue),
+            orders = sum(orders))
+
+kiosk.ship.code.sail.date <- QueueTrended(excalibur.prod,
+                              "2019-03-01",
+                              "2019-09-30",
+                              metrics  = c("cm300006910_5a8de975ec83501a0bb46450","revenue","orders"),
+                              c("evar142"),
+                              top = 50000,
+                              max.attempts = 1000,
+                              date.granularity = "month",
+                              segment.id =  c("s300006910_5ac248b259161d7157e75c01", # Kisok only
+                                              "s300006910_59cbc683e3d26c79ed095ac0", 
+                                              "s300006910_5aabf2d3de3c976aada2a8d8")
+                              )
+
+kiosk.ship.code.sail.date$datetime <- as.Date(kiosk.ship.code.sail.date$datetime)
+
+destination.rev.kiosk <- itinerary.reference %>% 
+  inner_join(kiosk.ship.code.sail.date, by = c("vorage.id" = "name")) %>% 
+  select(datetime, Brand, Rdss.Product.Code, cm300006910_5a8de975ec83501a0bb46450, revenue, orders)
+
+colnames(destination.rev.kiosk) <- c("month", "brand.code", "destination.code", "conversion.rate", "revenue", "orders")
+
+destination.rev.kiosk[is.na(destination.rev.kiosk)] <- 0
+destination.code.fixed.kiosk <- tidyr::separate(destination.rev.kiosk, destination.code, into = c("name", "value"), "(?<=[A-Z])(?=[0-9])") %>% 
+  filter(revenue != 0) %>% 
+  group_by(brand.code, month, name) %>% 
+  summarise(conversion.rate.avg = mean(conversion.rate*0.01),
+            revenue = sum(revenue),
+            orders = sum(orders))
+
+```
+

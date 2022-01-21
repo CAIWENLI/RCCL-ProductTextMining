@@ -1,0 +1,172 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r Setup, include=FALSE}
+rm(list=ls())
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load all packages}
+library(RPostgreSQL)
+library(dplyr)
+library(dbplyr)
+library(data.table)
+library(lubridate)
+library(reshape2)
+library(stringr)
+library(tidyverse)
+library(readxl)
+library(knitr)
+library(ggplot2)
+library(udpipe)
+```
+
+```{r string cleaning}
+product.name.cleaning <- read_csv("C:/Users/7005773/Desktop/Code/R Code/RCCL/Assets/Inputs/product.name.cleaning.csv")
+product.name.cleaning$PRODUCT_ID <- as.factor(product.name.cleaning$PRODUCT_ID)
+
+product.name.cleaning$COMPONENT_NAME <- gsub("[[:punct:]]", "", product.name.cleaning$COMPONENT_NAME)
+product.name.cleaning$COMPONENT_NAME <- gsub("[][!#$%()*,.:;<=>@^_`|~.{}]", "", product.name.cleaning$COMPONENT_NAME)
+product.name.cleaning$COMPONENT_NAME <- gsub("[[:digit:]]+", "", product.name.cleaning$COMPONENT_NAME)
+product.name.cleaning$COMPONENT_NAME <- lapply(product.name.cleaning$COMPONENT_NAME, tolower)
+product.name.cleaning$COMPONENT_NAME <- gsub(" *\\b[[:alpha:]]{1,2}\\b *", " ", product.name.cleaning$COMPONENT_NAME) 
+product.name.cleaning$COMPONENT_NAME <- trimws(product.name.cleaning$COMPONENT_NAME)
+## product.name.cleaning$COMPONENT_NAME <- gsub("\\s+", "_", product.name.cleaning$COMPONENT_NAME)
+product.name.cleaning$COMPONENT_NAME <- gsub(' +',' ',product.name.cleaning$COMPONENT_NAME) 
+
+product.count <- product.name.cleaning %>% 
+  filter(!COMPONENT_NAME %in% c("",'test')) %>% 
+  group_by(COMPONENT_NAME) %>% 
+  summarise(nrow = n())
+
+cate.count <- product.name.cleaning %>% 
+  filter(!COMPONENT_NAME %in% c("",'test')) %>% 
+  group_by(OWNER_DESC) %>% 
+  summarise(nrow = n())
+```
+
+```{r shorex text mining data prepare}
+shorex.product <- product.name.cleaning %>% 
+  filter(OWNER_DESC %in% "Shore Excursion")
+
+ud_model <- udpipe_download_model(language = "english")
+ud_model <- udpipe_load_model(ud_model$file_model)
+x <- udpipe_annotate(ud_model, x = product.name.cleaning$COMPONENT_NAME, doc_id = product.name.cleaning$PRODUCT_ID)
+x <- as.data.frame(x)
+str(x)
+```
+
+```{r text analysis}
+library(lattice)
+stats <- txt_freq(x$upos)
+stats$key <- factor(stats$key, levels = rev(stats$key))
+barchart(key ~ freq, data = stats, col = "cadetblue", 
+         main = "UPOS (Universal Parts of Speech)\n frequency of occurrence", 
+         xlab = "Freq")
+
+## NOUNS
+stats <- subset(x, upos %in% c("NOUN")) 
+stats <- txt_freq(stats$token)
+stats$key <- factor(stats$key, levels = rev(stats$key))
+barchart(key ~ freq, data = head(stats, 20), col = "cadetblue", 
+         main = "Most occurring nouns", xlab = "Freq")
+
+## ADJECTIVES
+stats <- subset(x, upos %in% c("ADJ")) 
+stats <- txt_freq(stats$token)
+stats$key <- factor(stats$key, levels = rev(stats$key))
+barchart(key ~ freq, data = head(stats, 20), col = "cadetblue", 
+         main = "Most occurring adjectives", xlab = "Freq")
+
+## Using RAKE
+stats <- keywords_rake(x = x, term = "lemma", group = "doc_id", 
+                       relevant = x$upos %in% c("NOUN", "ADJ"))
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+barchart(key ~ rake, data = head(subset(stats, freq > 3), 20), col = "cadetblue", 
+         main = "Keywords identified by RAKE", 
+         xlab = "Rake")
+
+## Using Pointwise Mutual Information Collocations
+x$word <- tolower(x$token)
+stats <- keywords_collocation(x = x, term = "word", group = "doc_id")
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+barchart(key ~ pmi, data = head(subset(stats, freq > 3), 20), col = "cadetblue", 
+         main = "Keywords identified by PMI Collocation", 
+         xlab = "PMI (Pointwise Mutual Information)")
+
+## Using a sequence of POS tags (noun phrases / verb phrases)
+x$phrase_tag <- as_phrasemachine(x$upos, type = "upos")
+stats <- keywords_phrases(x = x$phrase_tag, term = tolower(x$token), 
+                          pattern = "(A|N)*N(P+D*(A|N)*N)*", 
+                          is_regex = TRUE, detailed = FALSE)
+stats <- subset(stats, ngram > 1 & freq > 3)
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+barchart(key ~ freq, data = head(stats, 20), col = "cadetblue", 
+         main = "Keywords - simple noun phrases", xlab = "Frequency")
+
+cooc <- cooccurrence(x = subset(x, upos %in% c("NOUN", "ADJ")), 
+                     term = "lemma", 
+                     group = c("doc_id", "paragraph_id", "sentence_id"))
+
+x$id <- unique_identifier(x, fields = c("sentence_id", "doc_id"))
+dtm <- subset(x, upos %in% c("NOUN", "ADJ"))
+dtm <- document_term_frequencies(dtm, document = "id", term = "lemma")
+dtm <- document_term_matrix(dtm)
+dtm <- dtm_remove_lowfreq(dtm, minfreq = 5)
+termcorrelations <- dtm_cor(dtm)
+y <- as_cooccurrence(termcorrelations)
+y <- subset(y, term1 < term2 & abs(cooc) > 0.2)
+y <- y[order(abs(y$cooc), decreasing = TRUE), ]
+head(y)
+
+x$topic_level_id <- unique_identifier(x, fields = c("doc_id", "paragraph_id", "sentence_id"))
+## Get a data.frame with 1 row per id/lemma
+dtf <- subset(x, upos %in% c("NOUN"))
+dtf <- document_term_frequencies(dtf, document = "topic_level_id", term = "lemma")
+head(dtf)
+
+stats <- subset(x, upos %in% "NOUN")
+stats <- txt_freq(x = stats$lemma)
+
+
+```
+
+```{r topic model}
+## Define the identifier at which we will build a topic model
+x$topic_level_id <- unique_identifier(x, fields = c("doc_id", "paragraph_id", "sentence_id"))
+## Get a data.frame with 1 row per id/lemma
+dtf <- subset(x, upos %in% c("NOUN"))
+dtf <- document_term_frequencies(dtf, document = "topic_level_id", term = "lemma")
+head(dtf)
+
+## Create a document/term/matrix for building a topic model
+dtm <- document_term_matrix(x = dtf)
+## Remove words which do not occur that much
+dtm_clean <- dtm_remove_lowfreq(dtm, minfreq = 5)
+head(dtm_colsums(dtm_clean))
+
+## Remove nouns which you really do not like (mostly too common nouns)
+dtm_clean <- dtm_remove_terms(dtm_clean, terms = c("appartement", "appart", "eter"))
+## Or keep of these nouns the top 50 based on mean term-frequency-inverse document frequency
+dtm_clean <- dtm_remove_tfidf(dtm_clean, top = 50)
+
+install.packages("topicmodels")
+library(topicmodels)
+m <- LDA(dtm_clean, k = 400, method = "Gibbs", 
+         control = list(nstart = 5, burnin = 2000, best = TRUE, seed = 1:5))
+
+```
+
+```{r basket of words - document cluster}
+library(tm)
+library(Matrix)
+x <- TermDocumentMatrix( Corpus( VectorSource(shorex.product$COMPONENT_NAME) ) )
+y <- sparseMatrix( i=x$i, j=x$j, x=x$v, dimnames = dimnames(x) )  
+install.packages("stringdist")
+library(stringdist)
+cl <- hclust(stringdist::stringdistmatrix(shorex.product$COMPONENT_NAME, method = "cosine", useNames = "strings"))
+plot(cl)
+```
+
